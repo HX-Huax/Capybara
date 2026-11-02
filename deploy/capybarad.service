@@ -6,6 +6,9 @@ Requires=docker.service
 [Service]
 ExecStart=/usr/local/bin/capybarad --config /etc/capybara/config.yaml
 RuntimeDirectory=capybara
+RuntimeDirectoryMode=0755
+# 保留容器绑定挂载的目录；停止/重启只重建 socket，不替换目录。
+RuntimeDirectoryPreserve=yes
 StateDirectory=capybara
 # M1 在正常停止时取消活跃作业；M2 shim 尚未实现。
 TimeoutStopSec=90

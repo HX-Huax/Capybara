@@ -73,12 +73,23 @@ Set a user label and mount the socket and client binary when creating a containe
 ```sh
 docker run -d --gpus all \
   --label capybara.user=alice \
-  -v /run/capybara/capybara.sock:/run/capybara/capybara.sock \
+  --mount type=bind,src=/run/capybara,dst=/run/capybara,readonly \
   -v "$PWD/bin/capy":/usr/local/bin/capy:ro \
   --name alice-dev YOUR_IMAGE
 ```
 
-Start the daemon before creating the container so the socket exists. If the daemon recreates the socket after a restart, a container using a file bind mount may need to be restarted to see the new socket.
+Start the daemon before creating the container so the runtime directory exists. Mount the entire `/run/capybara` directory as shown above. The service uses `RuntimeDirectoryPreserve=yes` to retain this directory across both restarts and separate stop/start operations. The daemon recreates the socket inside the same directory, so containers can reconnect without being restarted. Binding only the socket file leaves containers referencing the old socket after a daemon restart.
+
+To apply the fix to an existing installation, run on the host when no jobs are active:
+
+```sh
+sudo install -m 0644 deploy/capybarad.service /etc/systemd/system/capybarad.service
+sudo systemctl daemon-reload
+sudo systemctl restart capybarad
+sudo systemctl show capybarad -p RuntimeDirectoryPreserve
+```
+
+The last command should report `RuntimeDirectoryPreserve=yes`. If a container already references a deleted runtime directory, restart that container once after the daemon starts. Existing containers that bind only the socket file need to be recreated with the directory mount. `/run` is temporary storage; preserving the directory across service restarts does not preserve it across host reboots.
 
 The daemon uses the `capybara.user` label to determine job ownership. Alternatively, map the container name to a user in the configuration:
 

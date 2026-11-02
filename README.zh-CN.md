@@ -30,10 +30,23 @@ sudo ./bin/capybarad --config /etc/capybara/config.yaml
 
 ```sh
 docker run -d --gpus all --label capybara.user=alice \
-  -v /run/capybara/capybara.sock:/run/capybara/capybara.sock \
+  --mount type=bind,src=/run/capybara,dst=/run/capybara,readonly \
   -v "$PWD/bin/capy":/usr/local/bin/capy:ro \
   --name alice-dev YOUR_IMAGE
 ```
+
+先启动守护进程，再创建容器。按上面的方式挂载整个 `/run/capybara` 目录。服务配置使用 `RuntimeDirectoryPreserve=yes`，停止、重启以及先停止再启动时都保留目录；守护进程只在原目录中重建 socket，容器无需重启即可重新连接。单独挂载 socket 文件会使容器在服务重启后仍引用旧 socket。
+
+已有部署需要在没有活跃作业时，在宿主机更新服务配置：
+
+```sh
+sudo install -m 0644 deploy/capybarad.service /etc/systemd/system/capybarad.service
+sudo systemctl daemon-reload
+sudo systemctl restart capybarad
+sudo systemctl show capybarad -p RuntimeDirectoryPreserve
+```
+
+最后一条命令应输出 `RuntimeDirectoryPreserve=yes`。如果容器已经挂载了被删除的旧目录，服务启动后需要再重启一次该容器；如果只挂载了 socket 文件，需要以目录挂载方式重新创建容器。`/run` 是临时存储，此配置不保证宿主机重启后保留原目录。
 
 在容器内执行：
 

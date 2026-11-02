@@ -364,7 +364,7 @@ capy admin disable-gpu <idx> | enable-gpu <idx>       # 管理员
 
 ```bash
 docker run -d --gpus all --label capybara.user=alice \
-  -v /run/capybara/capybara.sock:/run/capybara/capybara.sock \
+  --mount type=bind,src=/run/capybara,dst=/run/capybara,readonly \
   -v /usr/local/bin/capy:/usr/local/bin/capy:ro \
   --name alice-dev <image>
 ```
@@ -389,6 +389,8 @@ Requires=docker.service
 [Service]
 ExecStart=/usr/local/bin/capybarad --config /etc/capybara/config.yaml
 RuntimeDirectory=capybara
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
 StateDirectory=capybara
 KillMode=process
 Restart=on-failure
@@ -473,3 +475,5 @@ notify:
 - 未实现 shim。正常停止取消活跃作业，systemd 暂用 `KillMode=control-group`；异常退出或取消无法确认时保留运行记录和 GPU 分配，待人工检查。M2 实现 shim 后再切换为设计中的无中断重启模式。
 - 暂未实现配额、优先级、公平份额、管理员接口、通知、日志清理、队列位置与 `--wait`。
 - 当前拒绝宿主机提交，并要求请求 UID 与内核连接 UID 一致，尚不支持 user namespace UID 映射。
+
+- 部署修复：systemd 使用 `RuntimeDirectoryPreserve=yes` 保留 `/run/capybara` 目录，容器挂载整个目录，避免服务重启后引用已删除的旧目录或旧 socket 文件；宿主机重启不在该保留保证范围内。
