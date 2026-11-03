@@ -5,6 +5,8 @@ Requires=docker.service
 
 [Service]
 ExecStart=/usr/local/bin/capybarad --config /etc/capybara/config.yaml
+# 只热加载 socket 和用户映射，不停止调度器或活跃作业。
+ExecReload=/bin/kill -HUP $MAINPID
 RuntimeDirectory=capybara
 RuntimeDirectoryMode=0755
 # 保留容器绑定挂载的目录；停止/重启只重建 socket，不替换目录。

@@ -1,5 +1,7 @@
 # 生产环境在宿主机运行；容器挂载 socket 与 capy 二进制。
 socket: /run/capybara/capybara.sock
+# 已有容器接入工具会自动追加真实监听路径；SIGHUP 可热加载。
+additional_sockets: []
 socket_mode: "0666"
 data_dir: /var/lib/capybara
 schedule_interval: 5s

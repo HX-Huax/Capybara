@@ -6,6 +6,8 @@ import (
 	"gopkg.in/yaml.v3"
 	"net"
 	"os"
+	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +22,7 @@ type Web struct {
 // Config 保存 MVP 的部署参数。
 type Config struct {
 	Web                  Web               `yaml:"web"`
+	AdditionalSockets    []string          `yaml:"additional_sockets"`
 	Socket               string            `yaml:"socket"`
 	SocketMode           string            `yaml:"socket_mode"`
 	DataDir              string            `yaml:"data_dir"`
@@ -48,6 +51,13 @@ func Load(path string) (Config, error) {
 	if !strings.HasPrefix(c.Socket, "/") || !strings.HasPrefix(c.DataDir, "/") || c.ScheduleInterval <= 0 || c.DefaultTimeLimit <= 0 || c.CancelGrace <= 0 {
 		return c, fmt.Errorf("路径必须为绝对路径，时间配置必须为正数")
 	}
+	seen := map[string]bool{}
+	for _, path := range c.SocketPaths() {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path || len(path) > 107 || seen[path] {
+			return c, fmt.Errorf("socket 路径需为不重复的规范绝对路径，且最多 107 字节: %s", path)
+		}
+		seen[path] = true
+	}
 	if c.Web.Listen != "" {
 		host, port, err := net.SplitHostPort(c.Web.Listen)
 		ip := net.ParseIP(host)
@@ -63,4 +73,19 @@ func Load(path string) (Config, error) {
 func (c Config) Mode() (os.FileMode, error) {
 	n, e := strconv.ParseUint(c.SocketMode, 8, 9)
 	return os.FileMode(n), e
+}
+
+// SocketPaths 保留原有 socket 字段，并追加持久化目录中的监听端点。
+func (c Config) SocketPaths() []string { return append([]string{c.Socket}, c.AdditionalSockets...) }
+
+// CheckReload 防止将未热加载的配置误报为已生效；其他变更需要计划重启。
+func (c Config) CheckReload(next Config) error {
+	c.Socket = next.Socket
+	c.AdditionalSockets = next.AdditionalSockets
+	c.SocketMode = next.SocketMode
+	c.Users = next.Users
+	if !reflect.DeepEqual(c, next) {
+		return fmt.Errorf("热加载仅支持 socket、additional_sockets、socket_mode 和 users，其他配置需要重启")
+	}
+	return nil
 }

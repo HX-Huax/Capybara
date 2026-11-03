@@ -7,6 +7,7 @@ import (
 	"capybara/internal/dashboard"
 	"capybara/internal/gpu"
 	"capybara/internal/identity"
+	"capybara/internal/localsocket"
 	"capybara/internal/runner"
 	"capybara/internal/scheduler"
 	"capybara/internal/store"
@@ -26,7 +27,13 @@ import (
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
-	if e := run(); e != nil {
+	var e error
+	if len(os.Args) > 1 && os.Args[1] == "attach" {
+		e = runAttach(os.Args[2:])
+	} else {
+		e = run()
+	}
+	if e != nil {
 		slog.Error("服务退出", "error", e)
 		os.Exit(1)
 	}
@@ -60,81 +67,84 @@ func run() error {
 		return e
 	}
 	defer s.Close()
-	// 活跃 socket 不可覆盖；只清理确认未被监听的旧 socket。
-	if info, err := os.Lstat(c.Socket); err == nil {
-		if info.Mode()&os.ModeSocket == 0 {
-			return fmt.Errorf("socket 路径已存在且不是 socket")
-		}
-		conn, err := net.DialTimeout("unix", c.Socket, time.Second)
-		if err == nil {
-			conn.Close()
-			return fmt.Errorf("socket 已在使用")
-		}
-		if !os.IsNotExist(err) && !isRefused(err) {
-			return err
-		}
-		if e = os.Remove(c.Socket); e != nil {
-			return e
-		}
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if e = os.MkdirAll(filepath.Dir(c.Socket), 0755); e != nil {
-		return e
-	}
-	l, e := net.Listen("unix", c.Socket)
-	if e != nil {
-		return e
-	}
-	defer l.Close()
-	mode, _ := c.Mode()
-	if e = os.Chmod(c.Socket, mode); e != nil {
-		return e
-	}
 	r := runner.Runner{DataDir: c.DataDir, Grace: c.CancelGrace}
 	sched := scheduler.New(s, r, func(ctx context.Context) ([]gpu.Device, error) { return gpu.Probe(ctx, c.ExternalThresholdMiB) }, c.DefaultTimeLimit)
 	if e = sched.Recover(); e != nil {
 		return e
 	}
-	// Web 与 CLI 分开监听和认证，不能通过 TCP 伪造容器身份。
-	servers := []*http.Server{{Handler: api.Server{Scheduler: sched, Users: c.Users}.Handler(), ConnContext: identity.ConnContext, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}}
-	listeners := []net.Listener{l}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
+	sockets := localsocket.New(identity.ConnContext)
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sockets.Shutdown(cleanup)
+	}()
+	// 每个端点都是直接监听，不能通过代理转发丢失原始 SO_PEERCRED。
+	mode, _ := c.Mode()
+	if e = sockets.Apply(c.SocketPaths(), mode, api.Server{Scheduler: sched, Users: c.Users}.Handler()); e != nil {
+		return e
+	}
+	var web *http.Server
+	webErrors := make(chan error, 1)
 	if c.Web.Listen != "" {
 		panel, err := dashboard.New(sched, os.Getenv(c.Web.TokenEnv))
 		if err != nil {
 			return err
 		}
-		wl, err := net.Listen("tcp", c.Web.Listen)
+		listener, err := net.Listen("tcp", c.Web.Listen)
 		if err != nil {
 			return fmt.Errorf("Web 监听失败: %w", err)
 		}
-		defer wl.Close()
-		servers = append(servers, &http.Server{Handler: panel.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10})
-		listeners = append(listeners, wl)
-		slog.Info("Web 面板启动", "address", wl.Addr().String())
+		defer listener.Close()
+		web = &http.Server{Handler: panel.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+		go func() { webErrors <- web.Serve(listener) }()
+		slog.Info("Web 面板启动", "address", listener.Addr().String())
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	done := make(chan struct{})
 	go func() { defer close(done); sched.Run(ctx, c.ScheduleInterval) }()
-	failures := make(chan error, len(servers))
-	for i, server := range servers {
-		listener := listeners[i]
-		go func(srv *http.Server) { failures <- srv.Serve(listener) }(server)
-	}
-	slog.Info("服务启动", "socket", c.Socket)
+	slog.Info("服务启动", "sockets", c.SocketPaths())
 	var serveErr error
-	select {
-	case <-ctx.Done():
-	case serveErr = <-failures:
+serving:
+	for {
+		select {
+		case <-ctx.Done():
+			break serving
+		case serveErr = <-sockets.Errors:
+			break serving
+		case serveErr = <-webErrors:
+			break serving
+		case <-hup:
+			if *path == "" {
+				slog.Error("热加载需要通过 --config 指定配置文件")
+				continue
+			}
+			next, err := config.Load(*path)
+			if err == nil {
+				err = c.CheckReload(next)
+			}
+			if err == nil {
+				nextMode, _ := next.Mode()
+				err = sockets.Apply(next.SocketPaths(), nextMode, api.Server{Scheduler: sched, Users: next.Users}.Handler())
+			}
+			if err != nil {
+				slog.Error("配置热加载失败，保留现有服务", "error", err)
+				continue
+			}
+			c = next
+			slog.Info("socket 和用户映射热加载完成", "sockets", c.SocketPaths())
+		}
 	}
 	stop()
-	// 任一监听失败都关闭另一入口，避免留下只有部分功能的服务。
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	for _, server := range servers {
-		_ = server.Shutdown(shutdown)
-		_ = server.Close()
+	_ = sockets.Shutdown(shutdown)
+	if web != nil {
+		_ = web.Shutdown(shutdown)
+		_ = web.Close()
 	}
 	<-done
 	if errors.Is(serveErr, http.ErrServerClosed) {
@@ -142,5 +152,3 @@ func run() error {
 	}
 	return serveErr
 }
-
-func isRefused(e error) bool { return os.IsTimeout(e) == false && errors.Is(e, syscall.ECONNREFUSED) }

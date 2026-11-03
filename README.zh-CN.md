@@ -63,6 +63,19 @@ capy nodes
 
 提交者必须属于可识别的 Docker cgroup，且容器有 `capybara.user` 标签或配置中的名称映射。宿主机请求直接拒绝；当前版本不支持 user namespace UID 映射。提交、详情和列表输出 JSON。
 
+## 不重建容器接入
+
+对于已有 `/home` 等持久化 bind mount 的容器，可以在宿主机执行：
+
+```sh
+sudo capybarad attach --container luoyi --user luoyi --mount /home --dry-run
+sudo capybarad attach --container luoyi --user luoyi --mount /home
+```
+
+工具识别真实挂载源，安装客户端与容器内链接，追加真实 socket 和用户映射，再通过 SIGHUP 热加载。重复运行可更新客户端，不停止、不重启或重建 Docker 容器。首次使用前需升级守护进程与 systemd 模板；首次服务升级仍须等待作业结束后重启。
+
+详见 [已有容器接入与升级](docs/existing-containers.zh-CN.md)，包括冲突文件处理、配置备份和热加载边界。
+
 ## 调度优先级
 
 提交时使用 `capy submit -p 10 -- 命令`，范围为 **-100 至 100**，默认为 **0**，数值越大越优先。旧数据库记录缺少该字段时自动按 0 处理，无需迁移。优先级相同时按提交时间、作业 ID 排序；不抢占已经运行的作业，也不会绕过资源不足的队首。

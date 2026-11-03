@@ -134,6 +134,23 @@ Environment variables are passed only through repeated `--env KEY` or `--env KEY
 
 Submission, listing, job details, and GPU status currently return JSON. The client also accepts `--socket PATH` to connect to a nondefault socket.
 
+## Attach existing containers without recreation
+
+For a running container with an existing persistent bind mount, run on the host:
+
+```sh
+sudo capybarad attach --container luoyi --user luoyi --mount /home --dry-run
+sudo capybarad attach --container luoyi --user luoyi --mount /home
+```
+
+The tool discovers the mount source, installs the client under `.capybara`, creates container-side symlinks, preserves YAML comments, and adds `additional_sockets` and the container's user mapping. It requests a SIGHUP reload and checks the client inside the container. It never stops, restarts, or recreates the container.
+
+Each extra socket is a real listener with the original peer credentials. Repeating `attach` atomically updates the client without restarting the container. Existing regular client files require explicit `--replace-client`, which keeps a backup; conflicting links and mounted sockets are not overwritten. Only existing bind mounts are supported by the automatic tool.
+
+Upgrade the daemon and systemd template once before using this command. That initial daemon upgrade still requires a planned service restart after active jobs finish. Subsequent socket and user changes use `systemctl reload capybarad`; running jobs remain active. Changes to other settings require a restart and are rejected during reload. Check the journal after manual reloads, since `systemctl reload` acknowledges signal delivery rather than configuration acceptance.
+
+See the [migration guide (Chinese)](docs/existing-containers.zh-CN.md) for the complete installation procedure. Socket directory paths must be real paths without symlink components and must be managed by the daemon account. The runtime socket is recreated after service restart; job data and Web credentials remain in their existing locations.
+
 ## Job priority
 
 Use `capy submit -p 10 -- COMMAND` to set a priority from **-100 to 100**. The default is **0**, including for existing records created before this feature. Higher values run first; ties use submission time and then job ID. Priority does not interrupt a running job, and a blocked queue head still reserves its place.
