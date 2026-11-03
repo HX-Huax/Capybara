@@ -14,6 +14,17 @@ import (
 	"time"
 )
 
+// socketTestDir 显式限制目录权限，避免 umask=0002/0000 时 t.TempDir 的
+// 子目录成为组可写，导致正常功能测试意外触发生产环境的权限保护。
+func socketTestDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 type peerKey struct{}
 
 func peerContext(ctx context.Context, c net.Conn) context.Context {
@@ -50,7 +61,7 @@ func shut(m *Manager) {
 
 // 两个真实 socket 保留同一提交进程的内核 PID；热加载失败不能破坏原有监听。
 func TestApplyCredentialsRollbackAndRemoval(t *testing.T) {
-	dir := t.TempDir()
+	dir := socketTestDir(t)
 	a := filepath.Join(dir, "main.sock")
 	b := filepath.Join(dir, "extra.sock")
 	manager := New(peerContext)
@@ -98,7 +109,7 @@ func TestApplyCredentialsRollbackAndRemoval(t *testing.T) {
 }
 
 func TestPathConflictsAndSymlinks(t *testing.T) {
-	dir := t.TempDir()
+	dir := socketTestDir(t)
 	real := filepath.Join(dir, "owned")
 	if err := os.Mkdir(real, 0755); err != nil {
 		t.Fatal(err)
@@ -149,7 +160,7 @@ func TestPathConflictsAndSymlinks(t *testing.T) {
 
 // 使用固定目录 FD 清理，只能删除自身创建的 socket，不能误删原路径的新文件。
 func TestPinnedDirectoryAndSafeCleanup(t *testing.T) {
-	root := t.TempDir()
+	root := socketTestDir(t)
 	dir := filepath.Join(root, "bundle")
 	path := filepath.Join(dir, "capy.sock")
 	ep, err := listen(path, 0600)
@@ -178,7 +189,7 @@ func TestPinnedDirectoryAndSafeCleanup(t *testing.T) {
 
 // systemd 的 UMask=0077 不能使新建接入目录对容器非 root 用户不可遍历。
 func TestNewDirectoryWithRestrictiveUmask(t *testing.T) {
-	root := t.TempDir()
+	root := socketTestDir(t)
 	old := syscall.Umask(0077)
 	defer syscall.Umask(old)
 	dir, err := Directory(filepath.Join(root, "new", "bundle"))
@@ -196,7 +207,7 @@ func TestNewDirectoryWithRestrictiveUmask(t *testing.T) {
 
 // 即使某个端点已被外部替换，权限更新失败时也必须恢复其他端点的原权限。
 func TestPermissionRollbackDoesNotTouchReplacement(t *testing.T) {
-	root := t.TempDir()
+	root := socketTestDir(t)
 	a := filepath.Join(root, "a.sock")
 	b := filepath.Join(root, "b.sock")
 	m := New(nil)
