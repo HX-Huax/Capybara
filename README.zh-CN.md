@@ -4,6 +4,8 @@
 
 Go 实现的单机多卡 GPU 作业队列。当前提供 M1 基础实现：Unix socket HTTP API、Docker 容器身份识别、SQLite 持久化、优先级调度、同级 FIFO、按 GPU UUID 分配、执行、超时、取消与日志跟随。
 
+日常提交、查看标准输出和管理作业，请阅读[快速使用指南](docs/quickstart.zh-CN.md)。
+
 ## 构建与检查
 
 需要 Linux、Go 1.22 或更新版本。宿主机运行环境还需要 Docker CLI 和 `nvidia-smi`；容器内需要 `sh`、`setsid`，以及支持进程组信号的 `kill`。

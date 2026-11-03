@@ -6,6 +6,8 @@ A GPU job queue for shared, single-server labs, written in Go. Submit commands f
 
 Capybara currently provides an M1 foundation. It includes job submission, priority scheduling with FIFO ties, SQLite persistence, GPU allocation by UUID, container identity checks, execution, timeouts, cancellation, and log streaming. See [Current limitations](#current-limitations) before deployment.
 
+For job submission, standard output, and common commands, see the [quick usage guide (Chinese)](docs/quickstart.zh-CN.md).
+
 ## How it works
 
 1. A user submits a command with `capy` inside a Docker container.

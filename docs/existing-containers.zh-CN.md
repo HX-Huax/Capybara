@@ -22,6 +22,12 @@
 
 每个目录中的 socket 都由同一个 `capybarad` 直接监听，不使用转发代理，保留原始 `SO_PEERCRED` 身份识别。
 
+```
+查询挂载映射 
+docker inspect wangyang \
+  --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}'
+```
+
 ## 1. 首次升级守护进程
 
 旧版尚不支持多 socket 和 SIGHUP。首次安装新版需要一次服务重启，请等待 Capybara 活跃作业结束后操作。**这不要求重启 Docker 容器**。现阶段仍未实现守护进程升级时无中断接管作业的 shim。
