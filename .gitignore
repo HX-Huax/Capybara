@@ -2,3 +2,8 @@
 *.db
 *.db-shm
 *.db-wal
+
+# 本地认证配置与管理令牌
+.env
+.env.*
+web.env

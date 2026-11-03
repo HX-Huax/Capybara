@@ -33,28 +33,12 @@ func (s Server) Handler() http.Handler {
 	m.HandleFunc("GET /v1/jobs/{id}", s.job)
 	m.HandleFunc("DELETE /v1/jobs/{id}", s.job)
 	m.HandleFunc("GET /v1/jobs/{id}/logs", s.job)
+	m.HandleFunc("PATCH /v1/admin/jobs/{id}", s.priority)
 	m.HandleFunc("GET /v1/nodes", func(w http.ResponseWriter, r *http.Request) {
-		d, e := s.Scheduler.Probe(r.Context())
+		d, e := s.Scheduler.Nodes(r.Context())
 		if e != nil {
 			http.Error(w, e.Error(), 503)
 			return
-		}
-		jobs, e := s.Scheduler.Store.List()
-		if e != nil {
-			http.Error(w, e.Error(), 500)
-			return
-		}
-		for i := range d {
-			for _, j := range jobs {
-				if j.State == "running" {
-					for _, uuid := range j.GPUs {
-						if uuid == d[i].UUID {
-							d[i].JobID = j.ID
-							d[i].External = false
-						}
-					}
-				}
-			}
 		}
 		write(w, d)
 	})
@@ -90,7 +74,7 @@ func (s Server) submit(w http.ResponseWriter, r *http.Request) {
 	if req.TimeLimit != "" {
 		limit, e = time.ParseDuration(req.TimeLimit)
 	}
-	if e != nil || limit <= 0 || req.NGPUs < 0 || len(req.Command) == 0 || req.Command[0] == "" || !filepath.IsAbs(req.Cwd) {
+	if e != nil || limit <= 0 || req.NGPUs < 0 || !model.ValidPriority(req.Priority) || len(req.Command) == 0 || req.Command[0] == "" || !filepath.IsAbs(req.Cwd) {
 		http.Error(w, "命令、工作目录、GPU 数量或时间限制无效", 400)
 		return
 	}
@@ -111,7 +95,7 @@ func (s Server) submit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "当前 MVP 不支持 userns UID 映射或指定其他用户", 403)
 		return
 	}
-	j := model.Job{User: who.User, Container: who.Container, Command: req.Command, Cwd: req.Cwd, Env: req.Env, UID: req.UID, NGPUs: req.NGPUs, TimeLimit: limit}
+	j := model.Job{User: who.User, Container: who.Container, Command: req.Command, Cwd: req.Cwd, Env: req.Env, UID: req.UID, NGPUs: req.NGPUs, Priority: req.Priority, TimeLimit: limit}
 	if e = s.Scheduler.Submit(&j); e != nil {
 		http.Error(w, e.Error(), 500)
 		return
@@ -210,4 +194,38 @@ func (s Server) job(w http.ResponseWriter, r *http.Request) {
 		case <-t.C:
 		}
 	}
+}
+
+// priority 只允许内核凭据 UID 为 0 的管理员调整排队作业。
+func (s Server) priority(w http.ResponseWriter, r *http.Request) {
+	who := r.Context().Value(identityKey{}).(identity.Identity)
+	if who.UID != 0 {
+		http.Error(w, "需要管理员权限", http.StatusForbidden)
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "无效作业 ID", 400)
+		return
+	}
+	var req struct {
+		Priority *int `json:"priority"`
+	}
+	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	d.DisallowUnknownFields()
+	if err = d.Decode(&req); err != nil || req.Priority == nil || !model.ValidPriority(*req.Priority) {
+		http.Error(w, "优先级必须在 -100 到 100 之间", 400)
+		return
+	}
+	var extra any
+	if d.Decode(&extra) != io.EOF {
+		http.Error(w, "请求必须只有一个 JSON 对象", 400)
+		return
+	}
+	j, err := s.Scheduler.SetPriority(id, *req.Priority)
+	if err != nil {
+		http.Error(w, err.Error(), 409)
+		return
+	}
+	write(w, j)
 }

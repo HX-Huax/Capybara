@@ -7,3 +7,9 @@ default_time_limit: 72h
 cancel_grace: 30s
 external_use_threshold_mib: 500
 users: {}
+
+# Web 管理面板默认关闭。启用时监听本机，通过 SSH 转发访问。
+# 令牌至少 32 字节，放在指定环境变量中，不要写入此配置。
+web:
+  listen: ""  # 启用示例："127.0.0.1:8080"
+  token_env: CAPYBARA_WEB_TOKEN

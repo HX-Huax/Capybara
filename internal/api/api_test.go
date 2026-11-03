@@ -62,3 +62,35 @@ func TestJobOwnershipAndRedaction(t *testing.T) {
 		t.Fatal("缺少内核凭据的请求应拒绝")
 	}
 }
+
+// Unix 管理接口不能让普通容器用户提升其他作业的优先级。
+func TestAdminPriorityAuthorization(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	s := Server{Scheduler: scheduler.New(st, runner.Runner{}, nil, time.Hour)}
+	j := model.Job{User: "alice"}
+	if err = s.Scheduler.Submit(&j); err != nil {
+		t.Fatal(err)
+	}
+	for _, uid := range []uint32{1000, 0} {
+		req := httptest.NewRequest("PATCH", "/v1/admin/jobs/1", strings.NewReader(`{"priority":15}`))
+		req.SetPathValue("id", "1")
+		req = req.WithContext(context.WithValue(req.Context(), identityKey{}, identity.Identity{User: "admin", UID: uid}))
+		w := httptest.NewRecorder()
+		s.priority(w, req)
+		want := 403
+		if uid == 0 {
+			want = 200
+		}
+		if w.Code != want {
+			t.Fatalf("uid %d: %d", uid, w.Code)
+		}
+	}
+	got, _ := st.Get(1)
+	if got.Priority != 15 {
+		t.Fatal("管理员修改未保存")
+	}
+}

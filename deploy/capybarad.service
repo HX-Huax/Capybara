@@ -16,6 +16,8 @@ KillMode=control-group
 Restart=on-failure
 User=root
 UMask=0077
+# 可选的 Web 管理令牌文件，使用 root:root / 0600，禁止提交到仓库。
+EnvironmentFile=-/etc/capybara/web.env
 
 [Install]
 WantedBy=multi-user.target

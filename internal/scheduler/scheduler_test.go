@@ -54,3 +54,66 @@ func TestFIFOAndCompletion(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+// 高优先级队首阻塞时，低优先级的小作业不能绕过；调整后队列立即生效。
+func TestPriorityOrderingAndUpdates(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	if err := os.Mkdir(filepath.Join(dir, "logs"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "jobs.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(st, runner.Runner{DataDir: dir}, func(context.Context) ([]gpu.Device, error) { return []gpu.Device{{UUID: "GPU-1"}}, nil }, time.Second)
+	low := model.Job{User: "alice", NGPUs: 1, Priority: -10}
+	high := model.Job{User: "bob", NGPUs: 2, Priority: 20}
+	for _, j := range []*model.Job{&low, &high} {
+		if err = s.Submit(j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.tick(context.Background())
+	got, _ := st.Get(low.ID)
+	if got.State != "pending" {
+		t.Fatal("低优先级作业绕过队首")
+	}
+	if _, err = s.SetPriority(low.ID, 30); err != nil {
+		t.Fatal(err)
+	}
+	// 重新打开数据库模拟服务重启，新的优先级必须保持。
+	if err = st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	s.Store = st
+	got, err = st.Get(low.ID)
+	if err != nil || got.Priority != 30 {
+		t.Fatalf("优先级未持久化: %+v %v", got, err)
+	}
+	s.tick(context.Background())
+	s.wg.Wait()
+	got, _ = st.Get(low.ID)
+	if got.State != "succeeded" {
+		t.Fatalf("优先级调整后未执行: %+v", got)
+	}
+	got, _ = st.Get(high.ID)
+	if got.State != "pending" {
+		t.Fatal("大作业应继续等待")
+	}
+	if _, err = s.SetPriority(low.ID, 40); err == nil {
+		t.Fatal("允许修改已结束作业")
+	}
+	if _, err = s.SetPriority(high.ID, 101); err == nil {
+		t.Fatal("允许越界优先级")
+	}
+}

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Capybara · 作业控制台</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <section id="login" class="login-shell">
+    <form id="login-form" class="login-card">
+      <span class="brand-icon" aria-hidden="true">C.</span>
+      <p class="eyebrow">CAPYBARA / LAB INFRASTRUCTURE</p>
+      <h1>让实验，有序运行。</h1>
+      <p class="muted">登录管理员控制台，查看 GPU、管理队列与追踪作业。</p>
+      <label for="token">管理员令牌</label>
+      <input id="token" name="token" type="password" required minlength="32" maxlength="4096" autocomplete="off" placeholder="输入服务器配置的管理令牌">
+      <p id="login-error" class="error" role="alert"></p>
+      <button id="login-submit" class="button primary" type="submit">进入控制台 <span aria-hidden="true">↗</span></button>
+      <p class="login-note">令牌仅保留在当前页面内存中，刷新页面后需重新登录。</p>
+    </form>
+    <p class="login-footer">SHARED RESOURCES. FOCUSED RESEARCH.</p>
+  </section>
+
+  <div id="application" class="app-shell" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="#overview"><span class="brand-icon">C.</span><span>capybara<small>LAB CONSOLE</small></span></a>
+      <div class="workspace"><span class="workspace-mark">L</span><div>实验室服务器<small>Single-node workspace</small></div></div>
+      <p class="nav-label">工作空间</p>
+      <nav aria-label="主导航">
+        <button class="nav-item active" data-view="overview" aria-current="page"><span aria-hidden="true">◫</span>总览<span class="nav-hint">01</span></button>
+        <button class="nav-item" data-view="jobs"><span aria-hidden="true">≡</span>作业队列<span id="nav-pending" class="nav-count">0</span></button>
+        <button class="nav-item" data-view="gpus"><span aria-hidden="true">▤</span>GPU 资源<span class="nav-hint">03</span></button>
+      </nav>
+      <div class="sidebar-bottom"><p><span class="status-dot"></span> 资源有序，实验专注</p><div class="admin-avatar">A</div><div class="admin-name">Administrator<small>全局管理权限</small></div><button id="logout" class="logout" aria-label="退出登录" title="退出登录">↗</button></div>
+    </aside>
+
+    <main>
+      <header class="topbar"><div class="breadcrumb">工作空间 <span>/</span> <strong id="breadcrumb-view">总览</strong></div><div class="topbar-right"><span id="connection" class="connection"><span class="status-dot"></span> 已连接</span><span class="topbar-label">HOST CONSOLE</span></div></header>
+      <div class="page-content">
+        <div class="page-heading"><div><p class="eyebrow">RESOURCE ORCHESTRATION</p><h1 id="view-title">每一份算力，都有安排。</h1><p id="view-description" class="muted">从等待到完成，在这里掌握实验的每一步。</p></div><div class="heading-actions"><span id="updated-at" class="muted">等待同步</span><div><button id="auto-refresh" class="button subtle" aria-pressed="true">自动刷新 · 开</button><button id="refresh" class="button">↻ 刷新</button></div></div></div>
+        <div id="notice" class="notice" role="status" hidden></div>
+        <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
+        <section id="stats-section" class="stats" aria-label="作业统计">
+          <article class="stat-card"><div class="stat-top">运行中 <span class="mini-label">RUNNING</span></div><div class="stat-value" id="stat-running">—</div><div class="stat-caption"><span class="status-dot"></span> 正在执行的实验</div></article>
+          <article class="stat-card"><div class="stat-top">排队中 <span class="mini-label">QUEUED</span></div><div class="stat-value" id="stat-pending">—</div><div class="stat-caption">优先级优先 · 同级按提交顺序</div></article>
+          <article class="stat-card"><div class="stat-top">GPU 分配 <span class="mini-label">ALLOCATED</span></div><div class="stat-value"><span id="stat-gpus">—</span><small id="stat-gpus-total"> / —</small></div><div class="stat-caption" id="stat-gpu-caption">等待设备采样</div></article>
+          <article class="stat-card stat-accent"><div class="stat-top">成功完成 <span class="mini-label">SUCCEEDED</span></div><div class="stat-value" id="stat-completed">—</div><div class="stat-caption">累计完成的作业</div></article>
+        </section>
+
+        <section id="gpu-section" class="section-block" aria-labelledby="gpu-title">
+          <div class="section-heading"><h2 id="gpu-title">GPU 资源 <span id="gpu-count" class="count-badge">0</span></h2><span class="section-note">实时采样 · UUID 稳定分配</span></div>
+          <div id="gpu-error" class="error-banner" role="status" hidden></div>
+          <div id="gpu-grid" class="gpu-grid"></div>
+          <div class="chart-panel"><div><h3>GPU 利用率趋势</h3><p class="muted">本次会话最近 60 次采样 · 各设备平均利用率</p></div><strong id="utilization-current">—</strong><canvas id="utilization-chart" width="960" height="100" role="img" aria-label="本次会话 GPU 平均利用率趋势"></canvas><p id="chart-caption" class="chart-caption">等待有效利用率采样</p></div>
+        </section>
+
+        <section id="jobs-section" class="section-block jobs-panel" aria-labelledby="jobs-title">
+          <div class="section-heading"><h2 id="jobs-title">作业队列 <span id="jobs-count" class="count-badge">0</span></h2><span class="section-note">优先级 ↓ / 提交时间 ↑ · 不抢占运行作业</span></div>
+          <div class="queue-toolbar"><div class="tabs" role="group" aria-label="作业状态"><button class="tab active" data-filter="all" aria-pressed="true">全部</button><button class="tab" data-filter="running" aria-pressed="false">运行中</button><button class="tab" data-filter="pending" aria-pressed="false">排队中</button><button class="tab" data-filter="history" aria-pressed="false">已结束</button></div><div class="filters"><label class="sr-only" for="owner-filter">按用户筛选</label><select id="owner-filter"><option value="">所有用户</option></select><label class="sr-only" for="search">搜索作业</label><input id="search" type="search" placeholder="搜索 ID、命令、用户…"></div></div>
+          <div class="table-scroll"><table><thead><tr><th scope="col">作业 / 命令</th><th scope="col">用户</th><th scope="col">状态</th><th scope="col">优先级</th><th scope="col">GPU</th><th scope="col">提交时间</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead><tbody id="jobs-body"></tbody></table></div>
+          <div id="jobs-empty" class="empty-state" hidden><span aria-hidden="true">≡</span><h3>这里暂时没有作业</h3><p>在容器中使用 capy submit 提交实验，或调整筛选条件。</p></div>
+          <div class="table-footer"><span id="pagination-info">0 个作业</span><div><button id="previous-page" class="button small">← 上一页</button><button id="next-page" class="button small">下一页 →</button></div></div>
+        </section>
+        <footer class="page-footer"><span>CAPYBARA <span class="footer-divider">/</span> 单机多卡实验调度</span><span>从容排队，专注探索。</span></footer>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="job-dialog" class="job-dialog" aria-labelledby="detail-title">
+    <div class="dialog-top"><div><p class="eyebrow">JOB INSPECTOR</p><h2 id="detail-title">作业详情</h2></div><button id="close-detail" class="icon-button" aria-label="关闭详情">✕</button></div>
+    <div id="detail-error" class="error-banner" role="alert" hidden></div>
+    <div id="detail-content"></div>
+    <section class="priority-editor"><div><label for="priority-input">调度优先级</label><p class="muted">-100 至 100，数值越大越优先；仅排队作业可修改。</p></div><div class="priority-controls"><input id="priority-input" type="number" min="-100" max="100" step="1" aria-label="新的调度优先级"><button id="save-priority" class="button">保存优先级</button></div></section>
+    <section class="log-section"><div class="section-heading"><h3>执行日志</h3><button id="follow-logs" class="button small" aria-pressed="true">自动跟随 · 开</button></div><p id="log-note" class="muted">显示末尾 64 KiB</p><pre id="log-output" tabindex="0" aria-label="作业输出日志">等待日志…</pre></section>
+    <div class="dialog-footer"><span class="muted">取消会终止容器内的作业进程组。</span><button id="cancel-job" class="button danger">取消作业</button></div>
+  </dialog>
+  <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title"><h2 id="confirm-title">取消这个作业？</h2><p id="confirm-description" class="muted"></p><div class="confirm-actions"><button id="confirm-back" class="button">保留作业</button><button id="confirm-cancel" class="button danger">确认取消</button></div></dialog>
+</body>
+</html>

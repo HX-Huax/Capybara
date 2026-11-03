@@ -54,10 +54,13 @@ func command() *cobra.Command {
 		_, e = io.Copy(out, resp.Body)
 		return e
 	}
-	var ngpus int
+	var ngpus, priority int
 	var limit string
 	var envs []string
 	submit := &cobra.Command{Use: "submit -g N [-t 24h] -- command [args...]", Short: "提交作业", Args: cobra.MinimumNArgs(1), RunE: func(c *cobra.Command, args []string) error {
+		if !model.ValidPriority(priority) {
+			return fmt.Errorf("优先级必须在 -100 到 100 之间")
+		}
 		cwd, e := os.Getwd()
 		if e != nil {
 			return e
@@ -73,9 +76,10 @@ func command() *cobra.Command {
 			}
 			env[k] = val
 		}
-		req := model.Submit{Command: args, Cwd: cwd, Env: env, UID: uint32(os.Getuid()), NGPUs: ngpus, TimeLimit: limit}
+		req := model.Submit{Command: args, Cwd: cwd, Env: env, UID: uint32(os.Getuid()), NGPUs: ngpus, Priority: priority, TimeLimit: limit}
 		return request(c.Context(), "POST", "/v1/jobs", req, c.OutOrStdout())
 	}}
+	submit.Flags().IntVarP(&priority, "priority", "p", 0, "调度优先级（-100 到 100，越大越优先）")
 	submit.Flags().IntVarP(&ngpus, "gpus", "g", 1, "申请 GPU 数量")
 	submit.Flags().StringVarP(&limit, "time-limit", "t", "", "运行时间限制")
 	submit.Flags().StringArrayVar(&envs, "env", nil, "传递环境变量 KEY 或 KEY=VALUE（可重复）")

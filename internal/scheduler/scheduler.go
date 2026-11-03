@@ -1,4 +1,4 @@
-// Package scheduler 实现严格 FIFO 和串行状态转换。
+// Package scheduler 实现优先级队列、同优先级 FIFO 和串行状态转换。
 package scheduler
 
 import (
@@ -47,6 +47,9 @@ func (s *Scheduler) Submit(j *model.Job) error {
 	if s.stopping {
 		return fmt.Errorf("服务正在停止")
 	}
+	if !model.ValidPriority(j.Priority) {
+		return fmt.Errorf("优先级必须在 -100 到 100 之间")
+	}
 	if e := s.Store.Create(j); e != nil {
 		return e
 	}
@@ -76,6 +79,56 @@ func (s *Scheduler) Cancel(id int64) error {
 	j.EndAt = &now
 	j.State = "cancelled"
 	return s.Store.Transition(j, "pending")
+}
+
+// SetPriority 在与调度相同的锁内更新排队作业，防止启动后被旧快照覆盖。
+func (s *Scheduler) SetPriority(id int64, priority int) (model.Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !model.ValidPriority(priority) {
+		return model.Job{}, fmt.Errorf("优先级必须在 -100 到 100 之间")
+	}
+	j, err := s.Store.Get(id)
+	if err != nil {
+		return j, err
+	}
+	if j.State != "pending" {
+		return j, fmt.Errorf("只能修改 pending 作业的优先级")
+	}
+	j.Priority = priority
+	if err = s.Store.Transition(j, "pending"); err != nil {
+		return j, err
+	}
+	s.Wake()
+	return j, nil
+}
+
+// Nodes 合并设备采样和持久化分配；监控与 CLI 使用相同判断。
+func (s *Scheduler) Nodes(ctx context.Context) ([]gpu.Device, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	devices, err := s.Probe(ctx)
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := s.Store.List()
+	if err != nil {
+		return nil, err
+	}
+	for i := range devices {
+		for _, j := range jobs {
+			if j.State != "running" {
+				continue
+			}
+			for _, uuid := range j.GPUs {
+				if uuid == devices[i].UUID {
+					devices[i].JobID = j.ID
+					devices[i].External = false
+				}
+			}
+		}
+	}
+	return devices, nil
 }
 
 // Recover 保留旧运行作业的分配，避免无法确认进程状态时重新使用 GPU。
@@ -143,6 +196,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 			free = append(free, d.UUID)
 		}
 	}
+	model.SortQueue(jobs)
 	for _, j := range jobs {
 		if j.State != "pending" {
 			continue

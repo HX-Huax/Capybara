@@ -1,9 +1,10 @@
-// capybarad 只监听本机 Unix socket；需要访问 Docker 与宿主机 /proc。
+// capybarad 提供 Unix socket API 与可选的本机 Web 面板，需要访问 Docker 与宿主机 /proc。
 package main
 
 import (
 	"capybara/internal/api"
 	"capybara/internal/config"
+	"capybara/internal/dashboard"
 	"capybara/internal/gpu"
 	"capybara/internal/identity"
 	"capybara/internal/runner"
@@ -95,24 +96,51 @@ func run() error {
 	if e = sched.Recover(); e != nil {
 		return e
 	}
+	// Web 与 CLI 分开监听和认证，不能通过 TCP 伪造容器身份。
+	servers := []*http.Server{{Handler: api.Server{Scheduler: sched, Users: c.Users}.Handler(), ConnContext: identity.ConnContext, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}}
+	listeners := []net.Listener{l}
+	if c.Web.Listen != "" {
+		panel, err := dashboard.New(sched, os.Getenv(c.Web.TokenEnv))
+		if err != nil {
+			return err
+		}
+		wl, err := net.Listen("tcp", c.Web.Listen)
+		if err != nil {
+			return fmt.Errorf("Web 监听失败: %w", err)
+		}
+		defer wl.Close()
+		servers = append(servers, &http.Server{Handler: panel.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10})
+		listeners = append(listeners, wl)
+		slog.Info("Web 面板启动", "address", wl.Addr().String())
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	done := make(chan struct{})
 	go func() { defer close(done); sched.Run(ctx, c.ScheduleInterval) }()
-	srv := &http.Server{Handler: api.Server{Scheduler: sched, Users: c.Users}.Handler(), ConnContext: identity.ConnContext, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
-	go func() {
-		<-ctx.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutdown)
-	}()
+	failures := make(chan error, len(servers))
+	for i, server := range servers {
+		listener := listeners[i]
+		go func(srv *http.Server) { failures <- srv.Serve(listener) }(server)
+	}
 	slog.Info("服务启动", "socket", c.Socket)
-	e = srv.Serve(l)
+	var serveErr error
+	select {
+	case <-ctx.Done():
+	case serveErr = <-failures:
+	}
 	stop()
+	// 任一监听失败都关闭另一入口，避免留下只有部分功能的服务。
+	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, server := range servers {
+		_ = server.Shutdown(shutdown)
+		_ = server.Close()
+	}
 	<-done
-	if e == http.ErrServerClosed {
+	if errors.Is(serveErr, http.ErrServerClosed) {
 		return nil
 	}
-	return e
+	return serveErr
 }
+
 func isRefused(e error) bool { return os.IsTimeout(e) == false && errors.Is(e, syscall.ECONNREFUSED) }

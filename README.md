@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 A GPU job queue for shared, single-server labs, written in Go. Submit commands from existing Docker containers and let a host daemon queue jobs, allocate GPUs, and run each command inside its originating container.
 
-Capybara currently provides an M1 foundation. It includes job submission, strict FIFO scheduling, SQLite persistence, GPU allocation by UUID, container identity checks, execution, timeouts, cancellation, and log streaming. See [Current limitations](#current-limitations) before deployment.
+Capybara currently provides an M1 foundation. It includes job submission, priority scheduling with FIFO ties, SQLite persistence, GPU allocation by UUID, container identity checks, execution, timeouts, cancellation, and log streaming. See [Current limitations](#current-limitations) before deployment.
 
 ## How it works
 
@@ -106,7 +106,7 @@ Run these commands inside the development container:
 
 ```sh
 # Submit a job requesting one GPU for up to 24 hours.
-capy submit -g 1 -t 24h -- python train.py
+capy submit -g 1 -p 10 -t 24h -- python train.py
 
 # Pass environment variables explicitly.
 capy submit -g 2 --env PYTHONPATH --env EXPERIMENT=baseline -- python train.py
@@ -134,21 +134,77 @@ Environment variables are passed only through repeated `--env KEY` or `--env KEY
 
 Submission, listing, job details, and GPU status currently return JSON. The client also accepts `--socket PATH` to connect to a nondefault socket.
 
+## Job priority
+
+Use `capy submit -p 10 -- COMMAND` to set a priority from **-100 to 100**. The default is **0**, including for existing records created before this feature. Higher values run first; ties use submission time and then job ID. Priority does not interrupt a running job, and a blocked queue head still reserves its place.
+
+An administrator can change the priority of a **pending** job through the Web console or `PATCH /v1/admin/jobs/{id}` with `{"priority": 20}` over the Unix socket. The Unix administrator endpoint requires peer UID 0 and the normal container identity check. Users may set priority when submitting their own jobs; this is a scheduling preference, not a quota or permission boundary.
+
+## Web control and monitoring
+
+The Chinese-language administrator console is embedded in `capybarad`; no frontend build, Node service, or external CDN is required. It provides:
+
+- Global job counts, queue search, user/state filters, and pagination.
+- GPU allocation, memory usage, utilization, and the last 60 utilization samples from the current browser session.
+- Job details, command arguments, timestamps, exit codes, and output logs.
+- Priority editing for pending jobs and cancellation with confirmation.
+- Automatic refresh every three seconds, with pause and manual refresh controls.
+
+Job submission remains in the container CLI so the daemon can verify the submitting container. The Web token grants **global administrator access**, including logs and cancellation across all users. It is separate from Unix socket authentication.
+
+### Enable on a server
+
+The Web listener is disabled by default. Add or update the following in `/etc/capybara/config.yaml`:
+
+```yaml
+web:
+  listen: "127.0.0.1:8080"
+  token_env: CAPYBARA_WEB_TOKEN
+```
+
+Generate a token file once on the host:
+
+```sh
+sudo sh -c 'umask 077; printf "CAPYBARA_WEB_TOKEN=%s\n" "$(openssl rand -hex 32)" > /etc/capybara/web.env'
+```
+
+The updated systemd unit reads this optional environment file. Install the new binary and service template, then restart when no jobs are active:
+
+```sh
+make build
+sudo install -m 0755 bin/capybarad /usr/local/bin/capybarad
+sudo install -m 0644 deploy/capybarad.service /etc/systemd/system/capybarad.service
+sudo systemctl daemon-reload
+sudo systemctl restart capybarad
+```
+
+Install the updated `bin/capy` as well to use `-p`; containers that bind the previous client file may need restarting to see the replacement.
+
+From your own computer, open an SSH tunnel to the host account:
+
+```sh
+ssh -N -L 8080:127.0.0.1:8080 icca@YOUR_SERVER
+```
+
+Visit **http://127.0.0.1:8080** and enter the token value from `/etc/capybara/web.env` (without the variable name). Only loopback IP listeners are accepted; the HTTP port is intended for local access or SSH forwarding. Tokens must contain at least 32 bytes and are retained only in browser memory. Reloading the page requires logging in again. Rotating the token requires updating the file and restarting the daemon.
+
+Logs are refreshed as bounded snapshots of their last 64 KiB. Charts show actual GPU utilization samples and are not persisted. If GPU probing fails, the console reports the failure while keeping job inspection and controls available.
+
 ## Current limitations
 
-- **Scheduling:** strict FIFO. If the first pending job needs more GPUs than are available, later jobs wait too. Quotas, priorities, fair-share scheduling, and backfilling are not implemented.
+- **Scheduling:** higher priority first, then submission time, then job ID. If the first pending job needs more GPUs than are available, later jobs wait too. Running jobs are not preempted. Quotas, fair-share scheduling, and backfilling are not implemented.
 - **GPU monitoring:** `nvidia-smi` supplies memory usage snapshots. An unallocated GPU with memory usage above the configured threshold is treated as externally occupied. Process ownership checks through NVML are not implemented. GPU probing failures pause new GPU allocations.
 - **Isolation:** `CUDA_VISIBLE_DEVICES` provides a soft constraint. Users can still bypass the queue and access GPUs exposed to their containers.
 - **Cancellation:** cancellation and timeouts first send TERM to the container process group, then attempt KILL after the grace period. If termination cannot be confirmed, the job stays `running` and retains its GPU allocation for manual inspection.
 - **Daemon restarts:** a normal shutdown cancels active jobs. After an abnormal exit, previously running jobs retain their allocations and require manual inspection. Shim-based takeover and automatic recovery are not implemented. Do not delete the database or manually release allocations while old jobs may still be running.
-- **Additional features:** administrator endpoints, notifications, log cleanup, queue position reporting, and `--wait` are not implemented.
+- **Additional features:** GPU administrator endpoints, notifications, log cleanup, queue position reporting, and `--wait` are not implemented. Pending-job priority editing is available through the administrator API and Web console.
 - **API time limits:** submission accepts duration strings such as `24h`; job details expose `time_limit_ns` as an integer number of nanoseconds.
 
 ## Validation
 
-Automated tests cover SQLite persistence, allocation conflicts and transaction rollback, stale state transitions, cgroup parsing, job ownership checks, environment variable redaction, shell argument preservation, resource retention after unconfirmed cancellation, and FIFO scheduling.
+Automated tests cover SQLite persistence, allocation conflicts and transaction rollback, stale state transitions, cgroup parsing, job ownership checks, environment variable redaction, shell argument preservation, resource retention after unconfirmed cancellation, priority ordering, FIFO ties, Web authentication, bounded log reads, and GPU metric parsing.
 
-Unit tests, race detection, `go vet`, static builds, and a Unix socket smoke test have passed in the development environment. Docker and GPU behavior is tested with substitutes; execution on real containers, driver compatibility, and GPU workloads still need validation on a GPU server.
+Unit tests, race detection, `go vet`, static builds, Unix/Web listener smoke tests, and desktop/mobile Chromium checks have passed in the development environment. Docker and GPU behavior is tested with substitutes; execution on real containers, driver compatibility, and GPU workloads still need validation on a GPU server.
 
 ## Design
 
