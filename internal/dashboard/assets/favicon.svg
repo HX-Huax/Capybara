@@ -1,1 +1,55 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="#d4dfaa"/><path d="M43 21a17 17 0 1 0 0 22" fill="none" stroke="#293526" stroke-width="6"/><circle cx="48" cy="45" r="4" fill="#293526"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <!-- 背景圆形的柔和渐变 -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#E8F5E9" />
+      <stop offset="100%" stop-color="#C8E6C9" />
+    </linearGradient>
+    <!-- 橘子亮部渐变 -->
+    <linearGradient id="orangeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFA726" />
+      <stop offset="100%" stop-color="#FB8C00" />
+    </linearGradient>
+    <!-- 水豚毛色渐变 -->
+    <linearGradient id="capyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#C48D5E" />
+      <stop offset="100%" stop-color="#9E6738" />
+    </linearGradient>
+  </defs>
+
+  <!-- 圆形背景 -->
+  <circle cx="128" cy="128" r="116" fill="url(#bgGrad)" />
+
+  <g transform="translate(0, 10)">
+    <!-- 水豚身体与头部 -->
+    <path d="M 60,230 C 60,150 75,95 130,95 C 185,95 200,140 200,230 Z" fill="url(#capyGrad)" stroke="#4A2E16" stroke-width="6" stroke-linejoin="round" />
+    
+    <!-- 左耳朵 -->
+    <ellipse cx="85" cy="105" rx="14" ry="10" transform="rotate(-20 85 105)" fill="#9E6738" stroke="#4A2E16" stroke-width="5" />
+    <!-- 右耳朵 -->
+    <ellipse cx="173" cy="105" rx="14" ry="10" transform="rotate(20 173 105)" fill="#9E6738" stroke="#4A2E16" stroke-width="5" />
+
+    <!-- 憨厚闭着的眼睛 -->
+    <path d="M 100,140 Q 112,148 122,140" fill="none" stroke="#36220F" stroke-width="5" stroke-linecap="round" />
+    <path d="M 144,140 Q 154,148 166,140" fill="none" stroke="#36220F" stroke-width="5" stroke-linecap="round" />
+
+    <!-- 嘴鼻区域 (深色大鼻子) -->
+    <path d="M 115,160 C 115,148 151,148 151,160 C 151,175 140,185 133,185 C 126,185 115,175 115,160 Z" fill="#6D4C3D" />
+    <!-- 鼻孔线 -->
+    <path d="M 126,162 L 126,174 M 140,162 L 140,174" stroke="#36220F" stroke-width="4" stroke-linecap="round" />
+    <!-- 呆萌的嘴巴 -->
+    <path d="M 126,176 Q 133,182 140,176" fill="none" stroke="#36220F" stroke-width="4" stroke-linecap="round" />
+
+    <!-- 头顶的橘子 -->
+    <g transform="translate(0, -5)">
+      <!-- 橘子叶片 -->
+      <path d="M 133,52 Q 148,40 155,50 Q 142,60 133,52 Z" fill="#66BB6A" stroke="#2E7D32" stroke-width="3" />
+      <!-- 橘子茎梗 -->
+      <path d="M 133,52 Q 131,45 133,42" fill="none" stroke="#4E342E" stroke-width="4" stroke-linecap="round" />
+      <!-- 橘子果实 -->
+      <circle cx="133" cy="72" r="24" fill="url(#orangeGrad)" stroke="#E65100" stroke-width="5" />
+      <!-- 橘子高光 -->
+      <circle cx="123" cy="64" r="4" fill="#FFF" opacity="0.6" />
+    </g>
+  </g>
+</svg>

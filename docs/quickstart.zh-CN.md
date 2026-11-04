@@ -7,7 +7,7 @@
 在宿主机执行：
 
 ```bash
-docker exec -it wangyang /bin/bash
+docker exec -it <container_name> /bin/bash
 ```
 
 以下命令均在容器内执行。切换到实际项目目录，提交时会记录当前工作目录：

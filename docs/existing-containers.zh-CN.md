@@ -5,15 +5,15 @@
 该方式适合当前实验室的映射：
 
 ```text
-宿主机 /home/icca/users/luoyi/  →  容器 /home/
+宿主机 /home/icca/users/<username>/  →  容器 /home/
 ```
 
 接入后路径为：
 
 ```text
 宿主机                                       容器内
-/home/icca/users/luoyi/.capybara/capy       →  /home/.capybara/capy
-/home/icca/users/luoyi/.capybara/capybara.sock → /home/.capybara/capybara.sock
+/home/icca/users/<username>/.capybara/capy       →  /home/.capybara/capy
+/home/icca/users/<username>/.capybara/capybara.sock → /home/.capybara/capybara.sock
 
 容器内链接：
 /usr/local/bin/capy              → /home/.capybara/capy
@@ -24,7 +24,7 @@
 
 ```
 查询挂载映射 
-docker inspect wangyang \
+docker inspect <container_name> \
   --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}'
 ```
 
@@ -58,7 +58,7 @@ sudo systemctl show capybarad --property=CanReload
 在宿主机执行，按实际容器名和挂载目标调整：
 
 ```sh
-sudo capybarad attach --container luoyi --user luoyi --mount /home --dry-run
+sudo capybarad attach --container <username> --user <username> --mount /home --dry-run
 ```
 
 工具会读取 `docker inspect`，确认：
@@ -73,7 +73,7 @@ sudo capybarad attach --container luoyi --user luoyi --mount /home --dry-run
 ## 3. 接入，无需重建容器
 
 ```sh
-sudo capybarad attach --container luoyi --user luoyi --mount /home
+sudo capybarad attach --container <username> --user <username> --mount /home
 ```
 
 工具自动完成：
@@ -108,7 +108,7 @@ capy submit -g 1 -p 10 -- python train.py
 
 ```sh
 sudo install -m 0755 bin/capy /usr/local/bin/capy
-sudo capybarad attach --container luoyi --user luoyi --mount /home
+sudo capybarad attach --container <username> --user <username> --mount /home
 ```
 
 重复操作会复用已有链接，不重复追加配置。客户端采用文件替换而非原地写入，已经运行的客户端进程继续使用旧文件，新启动的客户端使用新版；容器不用重启。
@@ -116,7 +116,7 @@ sudo capybarad attach --container luoyi --user luoyi --mount /home
 如果容器原来放置的是一个**普通客户端文件**，默认拒绝覆盖。确认需要替换后使用：
 
 ```sh
-sudo capybarad attach --container luoyi --user luoyi --mount /home --replace-client
+sudo capybarad attach --container <username> --user <username> --mount /home --replace-client
 ```
 
 原文件会保留在容器内 `/usr/local/bin/capy.capybara-backup`。已有其他软链接、socket、直接绑定挂载的客户端或 socket 不会被强制覆盖；这些容器已有接入方式，应保留原方式或另行迁移。
@@ -127,10 +127,10 @@ sudo capybarad attach --container luoyi --user luoyi --mount /home --replace-cli
 
 ```yaml
 additional_sockets:
-  - /home/icca/users/luoyi/.capybara/capybara.sock
+  - /home/icca/users/<username>/.capybara/capybara.sock
   - /home/icca/users/wuxinyu/.capybara/capybara.sock
 users:
-  luoyi: luoyi
+  <username>: <username>
   wuxinyu: wuxinyu
 ```
 
@@ -162,7 +162,7 @@ sudo journalctl -u capybarad -n 30 --no-pager
 
 ```sh
 sudo journalctl -u capybarad -n 50 --no-pager
-docker exec luoyi /usr/local/bin/capy ls
+docker exec <username> /usr/local/bin/capy ls
 ```
 
 目前已通过挂载识别、重复执行、配置保留、真实 Unix socket 凭据、热加载回滚和运行中作业不中断的回归测试；Docker 操作用替身测试，仍需在真实服务器上完成首次容器接入验收。
