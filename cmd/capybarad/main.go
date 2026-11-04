@@ -100,7 +100,8 @@ func run() error {
 			return fmt.Errorf("Web 监听失败: %w", err)
 		}
 		defer listener.Close()
-		web = &http.Server{Handler: panel.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+		// 重启接口最多等待 Docker 60 秒，写超时需覆盖查询与重启的总耗时。
+		web = &http.Server{Handler: panel.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 75 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 		go func() { webErrors <- web.Serve(listener) }()
 		slog.Info("Web 面板启动", "address", listener.Addr().String())
 	}

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -53,5 +54,37 @@ func TestSocketPathsAndReload(t *testing.T) {
 		if _, err = Load(p); err == nil {
 			t.Fatalf("接受无效端点 %s", extra)
 		}
+	}
+}
+
+// 开放监听必须显式启用，且不能绕过地址与令牌环境变量校验。
+func TestRemoteWebConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		addr  string
+		allow bool
+		valid bool
+	}{
+		{"0.0.0.0:8080", true, true}, {"192.168.3.69:8080", true, true},
+		{"[::]:8080", true, true}, {"192.168.3.69:8080", false, false},
+		{"127.0.0.1:8080", true, true}, {":8080", true, false}, {"invalid", true, false},
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		body := fmt.Sprintf("web:\n  listen: %q\n  allow_remote: %t\n", tc.addr, tc.allow)
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		c, err := Load(path)
+		if (err == nil) != tc.valid {
+			t.Fatalf("%s allow=%t: %v", tc.addr, tc.allow, err)
+		}
+		if err == nil && c.Web.TokenEnv != "CAPYBARA_WEB_TOKEN" {
+			t.Fatal("令牌配置被改变")
+		}
+	}
+	base, _ := Load("")
+	next := base
+	next.Web.AllowRemote = true
+	if err := base.CheckReload(next); err == nil {
+		t.Fatal("Web 访问范围变更应要求重启")
 	}
 }

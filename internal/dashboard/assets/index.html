@@ -59,6 +59,13 @@
           <div class="chart-panel"><div><h3>GPU 利用率趋势</h3><p class="muted">本次会话最近 60 次采样 · 各设备平均利用率</p></div><strong id="utilization-current">—</strong><canvas id="utilization-chart" width="960" height="100" role="img" aria-label="本次会话 GPU 平均利用率趋势"></canvas><p id="chart-caption" class="chart-caption">等待有效利用率采样</p></div>
         </section>
 
+        <section id="containers-section" class="section-block jobs-panel" aria-labelledby="containers-title">
+          <div class="section-heading"><h2 id="containers-title">Docker 容器</h2><span class="section-note">运行中的队列作业会阻止重启</span></div>
+          <div id="containers-error" class="error-banner" role="alert" hidden></div>
+          <div class="table-scroll"><table><thead><tr><th>容器 / 镜像</th><th>状态</th><th>运行作业</th><th>操作</th></tr></thead><tbody id="containers-body"></tbody></table></div>
+          <p id="containers-empty" class="empty-state">等待容器数据…</p>
+        </section>
+
         <section id="jobs-section" class="section-block jobs-panel" aria-labelledby="jobs-title">
           <div class="section-heading"><h2 id="jobs-title">作业队列 <span id="jobs-count" class="count-badge">0</span></h2><span class="section-note">优先级 ↓ / 提交时间 ↑ · 不抢占运行作业</span></div>
           <div class="queue-toolbar"><div class="tabs" role="group" aria-label="作业状态"><button class="tab active" data-filter="all" aria-pressed="true">全部</button><button class="tab" data-filter="running" aria-pressed="false">运行中</button><button class="tab" data-filter="pending" aria-pressed="false">排队中</button><button class="tab" data-filter="history" aria-pressed="false">已结束</button></div><div class="filters"><label class="sr-only" for="owner-filter">按用户筛选</label><select id="owner-filter"><option value="">所有用户</option></select><label class="sr-only" for="search">搜索作业</label><input id="search" type="search" placeholder="搜索 ID、命令、用户…"></div></div>
@@ -80,5 +87,6 @@
     <div class="dialog-footer"><span class="muted">取消会终止容器内的作业进程组。</span><button id="cancel-job" class="button danger">取消作业</button></div>
   </dialog>
   <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title"><h2 id="confirm-title">取消这个作业？</h2><p id="confirm-description" class="muted"></p><div class="confirm-actions"><button id="confirm-back" class="button">保留作业</button><button id="confirm-cancel" class="button danger">确认取消</button></div></dialog>
+  <dialog id="restart-dialog" class="confirm-dialog" aria-labelledby="restart-title"><h2 id="restart-title">重启容器？</h2><p id="restart-description" class="muted"></p><p class="muted">容器内的 SSH 连接和手动启动的程序会中断。请确认没有其他用户正在使用。</p><div class="confirm-actions"><button id="restart-back" class="button">返回</button><button id="restart-confirm" class="button danger">确认重启</button></div></dialog>
 </body>
 </html>

@@ -171,6 +171,17 @@ The Chinese-language administrator console is embedded in `capybarad`; no fronte
 
 Job submission remains in the container CLI so the daemon can verify the submitting container. The Web token grants **global administrator access**, including logs and cancellation across all users. It is separate from Unix socket authentication.
 
+### Restart Docker containers
+
+In the overview's **Docker containers** table, select a container and confirm the action:
+
+- **Graceful restart**: request shutdown, wait up to 10 seconds, then force termination if necessary and start again.
+- **Forced restart**: terminate and restart without waiting for graceful shutdown. Unsaved data may be lost.
+
+The table lists all Docker containers on the host; access requires the global administrator token. Both modes interrupt container SSH sessions and manually launched programs. Both refuse to restart containers with running Capybara jobs, including jobs whose termination is unconfirmed. Cancel those jobs and confirm they have ended first. Scheduling for the selected container pauses during restart, while other containers continue. Success resumes scheduling; failure or timeout keeps it paused until a successful retry. Maintenance state is in memory only and is cleared when capybarad restarts, so resolve unconfirmed container state before restarting the daemon.
+
+Containers are not recreated and existing mounts are retained. The host daemon must be able to execute the Docker CLI.
+
 ### Enable on a server
 
 The Web listener is disabled by default. Add or update the following in `/etc/capybara/config.yaml`:
@@ -205,7 +216,20 @@ From your own computer, open an SSH tunnel to the host account:
 ssh -N -L 8080:127.0.0.1:8080 icca@YOUR_SERVER
 ```
 
-Visit **http://127.0.0.1:8080** and enter the token value from `/etc/capybara/web.env` (without the variable name). Only loopback IP listeners are accepted; the HTTP port is intended for local access or SSH forwarding. Tokens must contain at least 32 bytes and are retained only in browser memory. Reloading the page requires logging in again. Rotating the token requires updating the file and restarting the daemon.
+Visit **http://127.0.0.1:8080** and enter the token value from `/etc/capybara/web.env` (without the variable name). By default only loopback IP listeners are accepted; use the explicit LAN setting below to allow remote access. Tokens must contain at least 32 bytes and are retained only in browser memory. Reloading the page requires logging in again. Rotating the token requires updating the file and restarting the daemon.
+
+### LAN access
+
+To connect directly from other computers, configure:
+
+```yaml
+web:
+  listen: "0.0.0.0:8080"
+  allow_remote: true
+  token_env: CAPYBARA_WEB_TOKEN
+```
+
+Restart the updated daemon when no jobs are active, then open `http://SERVER_LAN_IP:8080`. The same administrator token is required. This Web configuration change requires a restart, not SIGHUP reload. Binding `0.0.0.0` listens on all IPv4 interfaces; use the server's specific LAN IP to restrict the listening interface, and permit the port through the host firewall only for the intended network. HTTP carries the token and logs without encryption; use an HTTPS reverse proxy or SSH forwarding on networks you do not trust.
 
 Logs are refreshed as bounded snapshots of their last 64 KiB. Charts show actual GPU utilization samples and are not persisted. If GPU probing fails, the console reports the failure while keeping job inspection and controls available.
 

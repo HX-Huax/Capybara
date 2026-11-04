@@ -24,10 +24,11 @@ function setMessage(id, text) { $(id).textContent = text; $(id).hidden = !text; 
 function notify(text) { setMessage('notice', text); }
 async function request(path, options = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const { timeoutMs = 10000, ...fetchOptions } = options;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(path, {
-      ...options, signal: controller.signal, cache: 'no-store', credentials: 'omit',
+      ...fetchOptions, signal: controller.signal, cache: 'no-store', credentials: 'omit',
       headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json', ...options.headers },
     });
     if (!response.ok) {
@@ -157,6 +158,7 @@ async function refresh() {
     showConnection(true); setMessage('error-banner', ''); setMessage('gpu-error', data.gpu_error ? `GPU 探测暂不可用：${data.gpu_error}` : '');
     $('updated-at').textContent = `同步于 ${new Date(data.updated_at).toLocaleTimeString('zh-CN')}`;
     renderStats(); renderGPUs(); renderOwners(); renderJobs(); renderChart(true);
+    await refreshContainers();
     if (data.gpu_error) { $('stat-gpus').textContent = '—'; $('stat-gpus-total').textContent = ' / —'; $('stat-gpu-caption').textContent = '设备探测暂不可用'; }
     if ($('job-dialog').open && state.selected !== null) await refreshDetail();
   } catch (error) {
@@ -205,6 +207,7 @@ function setView(view) {
   state.view = view;
   const titles = { overview: ['总览', '每一份算力，都有安排。', '从等待到完成，在这里掌握实验的每一步。'], jobs: ['作业队列', '让每个实验，有序向前。', '查看全局队列，调整优先级，追踪每次运行。'], gpus: ['GPU 资源', '算力状态，一目了然。', '查看设备分配、显存与本次会话的利用率趋势。'] };
   $('breadcrumb-view').textContent = titles[view][0]; $('view-title').textContent = titles[view][1]; $('view-description').textContent = titles[view][2];
+  $('containers-section').hidden = view === 'jobs';
   $('stats-section').hidden = view !== 'overview'; $('gpu-section').hidden = view === 'jobs'; $('jobs-section').hidden = view === 'gpus';
   document.querySelectorAll('[data-view]').forEach(button => { const active = button.dataset.view === view; button.classList.toggle('active', active); if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); });
   renderChart(false);
@@ -212,6 +215,7 @@ function setView(view) {
 function logout() {
   state.token = ''; state.jobs = []; state.nodes = []; state.samples = []; state.lastSample = 0;
   state.selected = null; state.detailGeneration++; state.refreshGeneration++;
+  $('containers-body').replaceChildren(); if ($('restart-dialog').open) $('restart-dialog').close();
   $('application').hidden = true; $('login').hidden = false; $('token').value = '';
   if ($('confirm-dialog').open) $('confirm-dialog').close();
   if ($('job-dialog').open) $('job-dialog').close();
@@ -264,3 +268,46 @@ $('confirm-cancel').addEventListener('click', async () => {
 window.addEventListener('resize', () => renderChart(false));
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state.auto) refresh(); });
 setInterval(() => { if (!document.hidden && state.auto) refresh(); }, 3000);
+
+// 容器操作使用完整 ID，名称只用于展示；独立错误不影响 GPU 和队列刷新。
+let restartTarget = null;
+const restartingContainers = new Set();
+async function refreshContainers() {
+  const generation = state.refreshGeneration;
+  try {
+    const rows = await request('/api/containers');
+    if (generation !== state.refreshGeneration) return;
+    $('containers-body').replaceChildren(...rows.map(container => {
+      const tr = el('tr'); const name = el('td');
+      name.append(el('strong', '', container.name), el('code', 'job-command', container.image));
+      const status = el('td', '', container.maintenance === 'restarting' ? '重启中' : container.maintenance === 'restart_error' ? '重启失败 · 调度暂停，请重试' : container.status);
+      const jobs = el('td', '', String(container.running_jobs)); const actions = el('td');
+      for (const [mode, label] of [['graceful', '优雅重启'], ['force', '强制重启']]) {
+        const button = el('button', mode === 'force' ? 'button small danger' : 'button small', label);
+        button.disabled = container.running_jobs > 0 || container.maintenance === 'restarting' || restartingContainers.has(container.id);
+        button.addEventListener('click', () => {
+          restartTarget = { id: container.id, name: container.name, mode };
+          $('restart-title').textContent = `${label} ${container.name}？`;
+          $('restart-description').textContent = mode === 'force' ? '立即终止容器进程并重启，未保存的数据可能丢失。' : '先请求容器退出，最多等待 10 秒，仍未退出则强制终止并重启。';
+          $('restart-dialog').showModal();
+        }); actions.append(button, document.createTextNode(' '));
+      }
+      tr.append(name, status, jobs, actions); return tr;
+    }));
+    $('containers-empty').hidden = rows.length > 0; $('containers-empty').textContent = '暂无容器';
+    setMessage('containers-error', '');
+  } catch (error) { if (generation === state.refreshGeneration) setMessage('containers-error', `容器信息获取失败：${error.message}`); }
+}
+$('restart-back').addEventListener('click', () => $('restart-dialog').close());
+$('restart-confirm').addEventListener('click', async () => {
+  if (!restartTarget) return;
+  const target = restartTarget; const generation = state.refreshGeneration;
+  restartingContainers.add(target.id); $('restart-dialog').close();
+  notify(`正在重启 ${target.name}…`);
+  try {
+    await request(`/api/containers/${target.id}/restart`, { method: 'POST', body: JSON.stringify({ mode: target.mode }), timeoutMs: 70000 });
+    if (generation === state.refreshGeneration) notify(`容器 ${target.name} 已重启。`);
+  } catch (error) {
+    if (generation === state.refreshGeneration) { setMessage('notice', ''); setMessage('error-banner', `容器重启未确认：${error.message}。请刷新容器状态后再操作。`); }
+  } finally { restartingContainers.delete(target.id); if (generation === state.refreshGeneration) await refreshContainers(); }
+});

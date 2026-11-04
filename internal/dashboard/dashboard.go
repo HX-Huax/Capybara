@@ -62,6 +62,8 @@ func (s *Server) Handler() http.Handler {
 	})
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/overview", s.overview)
+	api.HandleFunc("GET /api/containers", s.containers)
+	api.HandleFunc("POST /api/containers/{id}/restart", s.restartContainer)
 	api.HandleFunc("GET /api/jobs/{id}", s.job)
 	api.HandleFunc("GET /api/jobs/{id}/logs", s.logs)
 	api.HandleFunc("DELETE /api/jobs/{id}", s.cancel)

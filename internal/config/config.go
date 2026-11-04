@@ -13,10 +13,12 @@ import (
 	"time"
 )
 
-// Web 配置可选的本机管理员面板；令牌从环境变量读取，不写入配置或数据库。
+// Web 配置可选的管理员面板；令牌从环境变量读取，不写入配置或数据库。
 type Web struct {
-	Listen   string `yaml:"listen"`
-	TokenEnv string `yaml:"token_env"`
+	// AllowRemote 显式允许非环回监听，管理员令牌认证仍然必须启用。
+	AllowRemote bool   `yaml:"allow_remote"`
+	Listen      string `yaml:"listen"`
+	TokenEnv    string `yaml:"token_env"`
 }
 
 // Config 保存 MVP 的部署参数。
@@ -61,8 +63,11 @@ func Load(path string) (Config, error) {
 	if c.Web.Listen != "" {
 		host, port, err := net.SplitHostPort(c.Web.Listen)
 		ip := net.ParseIP(host)
-		if err != nil || ip == nil || !ip.IsLoopback() || port == "" || c.Web.TokenEnv == "" {
-			return c, fmt.Errorf("Web 监听必须使用 loopback IP:port，且需要 token_env")
+		if err != nil || ip == nil || port == "" || c.Web.TokenEnv == "" {
+			return c, fmt.Errorf("Web 监听必须使用有效的 IP:port，且需要 token_env")
+		}
+		if !ip.IsLoopback() && !c.Web.AllowRemote {
+			return c, fmt.Errorf("非环回 Web 监听需要显式设置 web.allow_remote: true")
 		}
 	}
 	_, e := c.Mode()

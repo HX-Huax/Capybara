@@ -117,3 +117,59 @@ func TestPriorityOrderingAndUpdates(t *testing.T) {
 		t.Fatal("允许越界优先级")
 	}
 }
+
+// 维护中的容器跳过调度，但不会阻塞其他容器；失败后需重试成功才恢复。
+func TestRestartSchedulingGuard(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	if err := os.Mkdir(filepath.Join(dir, "logs"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(dir, "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	s := New(st, runner.Runner{DataDir: dir}, func(context.Context) ([]gpu.Device, error) { return nil, nil }, time.Second)
+	a, b := model.Job{User: "a", Container: "a"}, model.Job{User: "b", Container: "b"}
+	for _, j := range []*model.Job{&a, &b} {
+		if err = s.Submit(j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	finish, err := s.BeginRestart("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.BeginRestart("a"); err == nil {
+		t.Fatal("允许并发重启")
+	}
+	s.tick(context.Background())
+	s.wg.Wait()
+	ja, _ := st.Get(a.ID)
+	jb, _ := st.Get(b.ID)
+	if ja.State != "pending" || jb.State != "succeeded" {
+		t.Fatal(ja.State, jb.State)
+	}
+	finish(false)
+	s.tick(context.Background())
+	s.wg.Wait()
+	ja, _ = st.Get(a.ID)
+	if ja.State != "pending" {
+		t.Fatal("失败后仍然调度")
+	}
+	finish, err = s.BeginRestart("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	finish(true)
+	s.tick(context.Background())
+	s.wg.Wait()
+	ja, _ = st.Get(a.ID)
+	if ja.State != "succeeded" {
+		t.Fatal(ja.State)
+	}
+}

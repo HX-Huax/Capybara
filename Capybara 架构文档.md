@@ -485,7 +485,7 @@ notify:
 - 调度按优先级降序、提交时间升序、ID 升序排列，保留严格队首等待，不抢占运行作业。公平份额仍为后续规划。
 - CLI 新增 `submit -p`。Unix 管理接口 `PATCH /v1/admin/jobs/{id}` 要求对端 UID 为 0，保持原有容器身份校验。
 - 优先级修改与调度共用互斥锁，只允许修改 pending 作业，避免已启动的执行器用旧快照覆盖新优先级。修改后立即唤醒调度。
-- Web 静态资源通过 `go:embed` 打包，使用独立 TCP listener，默认关闭，仅允许 loopback IP。`web.listen` 配置地址，`web.token_env` 指定管理员令牌环境变量；systemd 可从 `/etc/capybara/web.env` 加载。
+- Web 静态资源通过 `go:embed` 打包，使用独立 TCP listener，默认关闭，默认仅允许 loopback IP；显式设置 `web.allow_remote: true` 可监听局域网 IP 或通配地址。`web.listen` 配置地址，`web.token_env` 指定管理员令牌环境变量；systemd 可从 `/etc/capybara/web.env` 加载。
 - Web API 使用 Bearer 管理令牌，全局可查看作业、读取末尾 64 KiB 日志、取消和调整优先级，不提供浏览器提交执行任意容器命令的入口。Unix API 不接受该令牌替代容器身份。
 - 浏览器仅在页面内存中保留令牌，数据通过 textContent 渲染，并启用 CSP、no-store 和 nosniff。控制台每 3 秒轮询，支持暂停；利用率趋势仅为当前会话最近 60 次真实采样。
 - GPU 采样增加设备名称、总显存、利用率；利用率不支持时显示暂无数据，不影响按显存和内部记录分配。
@@ -501,3 +501,12 @@ notify:
 - 监听目录使用逐级 O_NOFOLLOW 打开和固定目录 FD，避免用户移动父目录或放入软链接后，服务误写其他位置；关闭只清理自身 socket inode，不删除持久化目录。
 - 首次升级到支持该功能的守护进程仍需计划服务重启；此方案不替代 shim，也不提供运行中二进制的热更新。
 - 具体迁移命令见 `docs/existing-containers.zh-CN.md`。
+
+- Web 局域网访问：`web.allow_remote` 默认 false；开启后允许非环回 IP，但仍要求管理员令牌。监听范围变更需计划重启服务。
+
+## 17. Web 容器重启（2026-11-04）
+
+- 受现有 Bearer 管理员令牌保护的 `GET /api/containers` 列出宿主机全部 Docker 容器；`POST /api/containers/{完整ID}/restart` 接受 `{"mode":"graceful"}` 或 `{"mode":"force"}`。只返回展示字段，不返回 inspect 环境变量。
+- 优雅模式使用 `docker restart --timeout 10`；强制模式使用 `--timeout 0`。前者遵循容器停止信号配置，10 秒后仍未退出则强制终止；后者不等待。页面要求二次确认并提示 SSH 与手动程序中断。
+- 在调度锁内检查该容器不存在 running 作业（包括退出未确认记录），并设置维护状态，避免检查与调度之间的竞争。两种模式都拒绝重启有 running 作业的容器。维护中的 pending 作业暂时跳过，其他容器可继续调度。
+- Docker 调用使用独立的 60 秒上下文，不因浏览器断开而取消。成功解除维护；失败或超时保留暂停并允许重试。维护状态仅存于内存，守护进程重启后清除；应先人工检查未确认容器，再重启守护进程。

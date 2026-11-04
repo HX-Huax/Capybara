@@ -16,20 +16,21 @@ import (
 
 // Scheduler 的锁覆盖提交、取消和调度，防止启动与取消交错。
 type Scheduler struct {
-	mu       sync.Mutex
-	Store    *store.Store
-	Runner   runner.Runner
-	Probe    func(context.Context) ([]gpu.Device, error)
-	Limit    time.Duration
-	active   map[int64]context.CancelFunc
-	wake     chan struct{}
-	stopping bool
-	wg       sync.WaitGroup
+	mu         sync.Mutex
+	Store      *store.Store
+	Runner     runner.Runner
+	Probe      func(context.Context) ([]gpu.Device, error)
+	Limit      time.Duration
+	active     map[int64]context.CancelFunc
+	wake       chan struct{}
+	restarting map[string]string
+	stopping   bool
+	wg         sync.WaitGroup
 }
 
 // New 创建调度器。
 func New(s *store.Store, r runner.Runner, p func(context.Context) ([]gpu.Device, error), limit time.Duration) *Scheduler {
-	return &Scheduler{Store: s, Runner: r, Probe: p, Limit: limit, active: map[int64]context.CancelFunc{}, wake: make(chan struct{}, 1)}
+	return &Scheduler{Store: s, Runner: r, Probe: p, Limit: limit, restarting: map[string]string{}, active: map[int64]context.CancelFunc{}, wake: make(chan struct{}, 1)}
 }
 
 // Wake 合并重复通知，定时器负责兜底。
@@ -201,6 +202,9 @@ func (s *Scheduler) tick(ctx context.Context) {
 		if j.State != "pending" {
 			continue
 		}
+		if _, blocked := s.restarting[j.Container]; blocked {
+			continue
+		}
 		if j.NGPUs > 0 && (probeErr != nil || len(free) < j.NGPUs) {
 			break
 		}
@@ -252,4 +256,49 @@ func (s *Scheduler) execute(ctx context.Context, cancel context.CancelFunc, j mo
 		slog.Error("写入作业结果失败", "job", j.ID, "error", e)
 	}
 	s.Wake()
+}
+
+// BeginRestart 在调度锁内检查活跃作业并预留容器，阻止检查后又启动新任务。
+// 调用方必须且只能调用一次返回的完成函数；false 保留暂停，允许后续重试。
+func (s *Scheduler) BeginRestart(id string) (func(bool), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping {
+		return nil, fmt.Errorf("服务正在停止")
+	}
+	if s.restarting[id] == "restarting" {
+		return nil, fmt.Errorf("容器正在重启")
+	}
+	jobs, err := s.Store.List()
+	if err != nil {
+		return nil, err
+	}
+	for _, j := range jobs {
+		if j.Container == id && j.State == "running" {
+			return nil, fmt.Errorf("容器内作业 #%d 正在运行或等待人工确认，请先处理作业", j.ID)
+		}
+	}
+	s.restarting[id] = "restarting"
+	return func(success bool) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if success {
+			delete(s.restarting, id)
+		} else {
+			s.restarting[id] = "restart_error"
+		}
+		s.Wake()
+	}, nil
+}
+
+// RestartStates 返回维护状态快照；失败后保持暂停，直到重试成功。
+// 维护状态仅在当前进程内有效，不写入数据库。
+func (s *Scheduler) RestartStates() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]string{}
+	for id, state := range s.restarting {
+		out[id] = state
+	}
+	return out
 }
